@@ -1,6 +1,14 @@
 import { Component, OnInit } from '@angular/core';
 import * as L from 'leaflet';
 
+declare global {
+  interface Window {
+    upvote: (index: number) => void;
+    downvote: (index: number) => void;
+    app: AppComponent;
+  }
+}
+
 @Component({
   selector: 'app-root',
   templateUrl: './app.component.html',
@@ -8,9 +16,11 @@ import * as L from 'leaflet';
 })
 export class AppComponent implements OnInit {
   map: any;
-  buracos: any[] = []; // Array para armazenar os marcadores
+  buracos: any[] = [];
 
   ngOnInit(): void {
+    window.app = this; // Disponibiliza o componente globalmente para os métodos upvote e downvote
+    this.loadBuracos();
     this.initMap();
   }
 
@@ -27,6 +37,7 @@ export class AppComponent implements OnInit {
           }).addTo(this.map);
 
           this.map.on('click', (e: any) => this.onMapClick(e));
+          this.updateMarkers();
         },
         () => this.fallbackMapInitialization()
       );
@@ -36,13 +47,14 @@ export class AppComponent implements OnInit {
   }
 
   private fallbackMapInitialization(): void {
-    this.map = L.map('map').setView([-23.55052, -46.633308], 13); // São Paulo como fallback
+    this.map = L.map('map').setView([-23.55052, -46.633308], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors',
     }).addTo(this.map);
 
     this.map.on('click', (e: any) => this.onMapClick(e));
+    this.updateMarkers();
   }
 
   private onMapClick(e: any): void {
@@ -81,12 +93,13 @@ export class AppComponent implements OnInit {
       lastInteraction: new Date().toISOString(),
     };
 
-    this.buracos.push(newMarker); // Adiciona ao array
+    this.buracos.push(newMarker);
+    this.saveBuracos();
     this.updateMarkers();
-    this.map.closePopup(); // Fecha o popup após salvar
+    this.map.closePopup();
   }
 
-  private updateMarkers(): void {
+  public updateMarkers(): void {
     this.map.eachLayer((layer: any) => {
       if (layer instanceof L.CircleMarker) {
         this.map.removeLayer(layer);
@@ -97,7 +110,7 @@ export class AppComponent implements OnInit {
   }
 
   private addMarker(buraco: any): void {
-    const color = this.getMarkerColor(buraco.gravidade);
+    const color = this.getMarkerColor(buraco);
     const marker = L.circleMarker([buraco.lat, buraco.lng], {
       color,
       radius: this.getMarkerSize(buraco.gravidade),
@@ -106,8 +119,12 @@ export class AppComponent implements OnInit {
     marker.bindPopup(this.createInteractionPopup(buraco));
   }
 
-  private getMarkerColor(gravidade: string): string {
-    switch (gravidade) {
+  private getMarkerColor(buraco: any): string {
+    if (buraco.status === 'consertado') {
+      return 'green';
+    }
+
+    switch (buraco.gravidade) {
       case 'low': return 'yellow';
       case 'medium': return 'orange';
       case 'high': return 'red';
@@ -129,8 +146,39 @@ export class AppComponent implements OnInit {
       <h4>Buraco</h4>
       <p>Gravidade: ${buraco.gravidade}</p>
       <p>Status: ${buraco.status}</p>
-      <button onclick="console.log('Upvote')">Upvote</button>
-      <button onclick="console.log('Downvote')">Downvote</button>
+      <p>Qtd upvote: ${buraco.upvote}</p>
+      <button onclick="window.upvote(${this.buracos.indexOf(buraco)})">Upvote</button>
+      <button onclick="window.downvote(${this.buracos.indexOf(buraco)})">Downvote</button>
     `;
   }
+
+  public saveBuracos(): void {
+    localStorage.setItem('buracos', JSON.stringify(this.buracos));
+  }
+
+  private loadBuracos(): void {
+    const saved = localStorage.getItem('buracos');
+    if (saved) {
+      this.buracos = JSON.parse(saved);
+    }
+  }
 }
+
+window.upvote = function (index: number) {
+  const buraco = window.app.buracos[index];
+  buraco.upvote++;
+  buraco.lastInteraction = new Date().toISOString();
+  window.app.saveBuracos();
+  window.app.updateMarkers();
+};
+
+window.downvote = function (index: number) {
+  const buraco = window.app.buracos[index];
+  buraco.downvote++;
+  buraco.lastInteraction = new Date().toISOString();
+  if (buraco.downvote >= 2) {
+    buraco.status = 'consertado';
+  }
+  window.app.saveBuracos();
+  window.app.updateMarkers();
+};
